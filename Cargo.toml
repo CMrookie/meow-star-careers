@@ -1,0 +1,31 @@
+[package]
+name = "just-a-work"
+version = "0.1.0"
+edition = "2024"
+description = "Modular actix-web + PostgreSQL API server with OpenAPI docs, unified error handling and structured logging"
+
+[dependencies]
+actix-web = { version = "4", features = ["macros", "ws"] }
+actix-ws = "0.4"
+actix-cors = "0.7"
+argon2 = "0.5"
+futures-util = "0.3"
+rand_core = { version = "0.6", features = ["getrandom"] }
+sha2 = "0.10"
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "chrono"] }
+tokio = { version = "1", features = ["sync", "macros"] }
+utoipa = { version = "5", features = ["actix_extras", "uuid", "chrono"] }
+utoipa-swagger-ui = { version = "9", features = ["actix-web"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+anyhow = "1"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-actix-web = "0.7"
+
+[profile.release]
+lto = true
