@@ -125,23 +125,26 @@ async fn register_validates_input_and_rejects_duplicates(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn admin_cannot_self_register(pool: PgPool) {
+async fn admin_and_reviewer_cannot_self_register(pool: PgPool) {
     let app = test::init_service(crate::app::create_app(common::state(pool))).await;
 
-    let (status, body) = call!(
-        app,
-        json_request(
-            Method::POST,
-            "/api/v1/auth/register",
-            None,
-            json!({"phone": "13900000001", "name": "伪管理员", "password": PASSWORD, "role": "admin"}),
-        )
-    );
-    assert_eq!(status, StatusCode::BAD_REQUEST, "admin 不可自助注册: {body}");
-    assert!(
-        body["message"].as_str().unwrap_or_default().contains("不可自助注册"),
-        "应给出明确原因: {body}"
-    );
+    // 平台管理与审核账号都是「内部账号」：注册接口一律拒绝，避免公开接口提权
+    for role in ["admin", "reviewer"] {
+        let (status, body) = call!(
+            app,
+            json_request(
+                Method::POST,
+                "/api/v1/auth/register",
+                None,
+                json!({"phone": "13900000001", "name": "伪内部账号", "password": PASSWORD, "role": role}),
+            )
+        );
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{role} 不可自助注册: {body}");
+        assert!(
+            body["message"].as_str().unwrap_or_default().contains("不可自助注册"),
+            "应给出明确原因: {body}"
+        );
+    }
 }
 
 #[sqlx::test]

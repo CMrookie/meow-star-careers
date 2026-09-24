@@ -101,6 +101,21 @@ pub async fn admin(pool: &PgPool, phone: &str) -> (Uuid, String) {
     (stored.user.id, token)
 }
 
+/// 创建审核专用账号（走生产同款 `create_reviewer`）并签发令牌 -> (user_id, token)
+pub async fn reviewer(pool: &PgPool, phone: &str) -> (Uuid, String) {
+    reviewer_named(pool, phone, "测试审核员").await
+}
+
+/// 同上，可指定姓名（多审核账号留痕用例需要区分是谁审的）
+pub async fn reviewer_named(pool: &PgPool, phone: &str, name: &str) -> (Uuid, String) {
+    let hash = security::hash_password(PASSWORD).unwrap();
+    let user = auth_repo::create_reviewer(pool, phone, name, &hash)
+        .await
+        .unwrap();
+    let token = auth_repo::issue_token(pool, user.id).await.unwrap();
+    (user.id, token)
+}
+
 /// 造出「求职者与该企业招聘者实际沟通过」的记录（会话 + 至少一条消息），
 /// 这是发起投诉的前置条件；返回会话 id。
 pub async fn make_exchange(pool: &PgPool, seeker_id: &Uuid, recruiter_id: &Uuid) -> Uuid {

@@ -9,6 +9,7 @@ pub mod health;
 pub mod interviews;
 pub mod jobs;
 pub mod push;
+pub mod reviewers;
 pub mod resumes;
 pub mod users;
 

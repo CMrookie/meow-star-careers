@@ -18,7 +18,7 @@ use crate::models::company::{Company, NewCompany};
 use crate::models::interview::{InterviewView, NewInterview};
 use crate::models::job::{JobPage, JobView, NewJob, UpdateJob};
 use crate::models::resume::{Resume, ResumePage, ResumeWrite};
-use crate::models::user::{NewUser, UpdateUser, User, UserPublic};
+use crate::models::user::{NewReviewer, NewUser, ResetPassword, SetActiveRequest, UpdateUser, User, UserPublic};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -85,6 +85,12 @@ use crate::models::user::{NewUser, UpdateUser, User, UserPublic};
         crate::handlers::complaints::my_complaints,
         crate::handlers::complaints::list_complaints,
         crate::handlers::complaints::review_complaint,
+        // 审核专用账号管理（仅平台管理员）
+        crate::handlers::reviewers::list_reviewers,
+        crate::handlers::reviewers::create_reviewer,
+        crate::handlers::reviewers::set_reviewer_active,
+        crate::handlers::reviewers::reset_reviewer_password,
+        crate::handlers::reviewers::delete_reviewer,
     ),
     components(
         schemas(
@@ -118,6 +124,9 @@ use crate::models::user::{NewUser, UpdateUser, User, UserPublic};
             ComplaintView,
             CreateComplaint,
             ReviewComplaint,
+            NewReviewer,
+            ResetPassword,
+            SetActiveRequest,
             ErrorResponse,
         ),
     ),
@@ -131,7 +140,8 @@ use crate::models::user::{NewUser, UpdateUser, User, UserPublic};
         (name = "resume", description = "简历管理（求职者）/ 简历检索（招聘者）"),
         (name = "chat", description = "一对一私聊（REST；实时通道见 /ws 与 README）"),
         (name = "interview", description = "线上视频面试（房间/状态/信令经 WS 转发）"),
-        (name = "complaint", description = "投诉（举报）与平台管理员审核"),
+        (name = "complaint", description = "投诉（举报）与审核（审核账号 / 平台管理员）"),
+        (name = "reviewer", description = "审核专用账号管理（仅平台管理员）"),
     ),
     modifiers(&SecurityAddon)
 )]

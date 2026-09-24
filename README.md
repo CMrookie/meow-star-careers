@@ -8,9 +8,9 @@
 - **模块化分层**：`models` / `repositories` / `handlers` / `db` / `ws` / `auth` / `security`，`main.rs` 保持精简
 - **统一错误处理**：单一 `AppError` + `ResponseError`，所有错误输出一致 JSON（`code` + `message`）并集中记录日志；5xx 对客户端脱敏
 - **日志记录**：tracing + tracing-subscriber（`RUST_LOG` 过滤），`TracingLogger` 输出结构化请求日志（含 request id）
-- **角色模型**：单 `users` 表 + `role`（seeker/recruiter/admin），招聘者关联 `companies`；注册时招聘者同事务创建企业；**admin 不可自助注册**，由服务端按 `ADMIN_PHONE` 幂等引导创建
+- **角色模型**：单 `users` 表 + `role`（seeker/recruiter/admin/reviewer），招聘者关联 `companies`；注册时招聘者同事务创建企业；**admin 与 reviewer 都不可自助注册** —— admin 由服务端按 `ADMIN_PHONE` 幂等引导，reviewer（审核专用账号）由 admin 通过 `/reviewers` 创建管理
 - **搜索**：PostgreSQL ILIKE/范围过滤 + 分页（零额外服务）
-- **测试**：`src/tests/` 集成测试（`#[sqlx::test]` 每个用例独立建库），覆盖鉴权 / 举报审核 / 列表排序
+- **测试**：`src/tests/` 集成测试（`#[sqlx::test]` 每个用例独立建库），覆盖鉴权 / 举报审核 / 审核账号 / 列表排序
 
 ## 目录结构
 
@@ -26,7 +26,8 @@
 │   ├── 0006_resumes_applications_saved.sql  # 简历/投递/收藏
 │   ├── ...                       # 0007-0012：手机号登录/面试/推送/企业地址/投诉
 │   ├── 0013_complaint_level_order.sql  # 投诉等级函数（列表按等级排序）
-│   └── 0014_admin_role.sql       # 平台管理员角色（admin 不可自助注册）
+│   ├── 0014_admin_role.sql       # 平台管理角色（admin 不可自助注册）
+│   └── 0015_reviewer_role.sql    # 审核专用账号（reviewer，由 admin 创建管理）
 └── src/
     ├── main.rs                   # 入口（配置/迁移/管理员引导/启动）
     ├── config.rs / logging.rs / db.rs / state.rs
@@ -37,8 +38,8 @@
     ├── openapi.rs / app.rs
     ├── models/     # user/auth/chat/company/job/resume/application/complaint/pagination
     ├── repositories/  # user/auth/chat/company/job/resume/application/complaint
-    ├── handlers/     # health/auth/users/companies/jobs/resumes/applications/chat/complaints
-    └── tests/        # 集成测试：鉴权 / 举报审核 / 列表排序（sqlx::test 独立库）
+    ├── handlers/     # health/auth/users/reviewers/companies/jobs/resumes/applications/chat/complaints
+    └── tests/        # 集成测试：鉴权 / 举报审核 / 审核账号 / 列表排序（sqlx::test 独立库）
 ```
 
 ## 快速开始
@@ -62,12 +63,17 @@ cargo run                       # 启动时自动执行迁移（建表 + COMMENT
 
 - 求职者：`role=seeker`（默认）——可浏览/搜索职位、收藏、维护简历、投递与撤回；
 - 招聘者：`role=recruiter` + `company` ——发布/上下架/编辑职位，查看并推进投递状态，检索公开简历；
-- 平台管理员：`role=admin` ——审核投诉（举报）、用户管理。**只能由服务端引导创建**：
+- 平台管理：`role=admin` ——**管理角色**：管理账号（创建/启停/改密/删除审核账号）、用户管理；作为超级角色也可代审投诉。**只能由服务端引导创建**：
   `POST /auth/register` 显式拒绝 `role=admin`（防公开接口提权），需要在 `.env` 里配置
   `ADMIN_PHONE` + `ADMIN_PASSWORD`（可选 `ADMIN_NAME`），服务启动时幂等创建：
   - 手机号不存在 → 新建 `admin` 账号；
   - 已是 `admin` → 保持原密码不动（不会每次启动静默改密）；
   - 已被其它角色占用 → 启动失败（**绝不把既有账号提权**）。
+- 审核专用账号：`role=reviewer` ——**只做举报审核**：查看投诉队列、通过/驳回投诉；
+  不能发职位、投递、维护简历，也不能管理账号（`/reviewers` 仅 admin）。同样**不可自助注册**，
+  由 admin 通过 `POST /api/v1/reviewers` 创建（手机号 + 初始密码），并可随时启用/禁用/改密/删除。
+  多个审核账号可**同时登录**、并行审核；同一账号也支持多端同时在线，审核记录通过
+  `reviewedBy` / `reviewedByName` 留痕，便于追溯是谁审的。
 - 注册接口：`POST /api/v1/auth/register`，请求体：
 
 ```jsonc
@@ -106,8 +112,19 @@ cargo run                       # 启动时自动执行迁移（建表 + COMMENT
 | --- | --- | --- |
 | POST | `/api/v1/companies/{id}/complaints` | 发起投诉（求职者；**须与该企业有过实际沟通**，证据 20-5000 字） |
 | GET | `/api/v1/complaints/mine` | 我发起的投诉 |
-| GET | `/api/v1/complaints` | 管理员=全部（`?status=pending/approved/rejected`）、招聘者=本企业、求职者=本人 |
-| POST | `/api/v1/complaints/{id}/review` | **仅管理员**审核 `{approved, note?}`：通过才累计企业投诉次数（影响职位列表排序），驳回不累计；重复审核 409 |
+| GET | `/api/v1/complaints` | 审核账号/管理员=全部（`?status=pending/approved/rejected`）、招聘者=本企业、求职者=本人 |
+| POST | `/api/v1/complaints/{id}/review` | **审核账号或管理员**审核 `{approved, note?}`：通过才累计企业投诉次数（影响职位列表排序），驳回不累计；重复审核 409；留痕 `reviewedBy`/`reviewedByName` |
+
+### 审核账号管理（仅平台管理员）
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/reviewers` | 审核专用账号列表 |
+| POST | `/api/v1/reviewers` | 创建 `{phone, name, password}` → `role=reviewer`，可直接登录审核 |
+| POST | `/api/v1/reviewers/{id}/active` | 启用/禁用 `{isActive}`；禁用**立即踢下线**（既有会话全部失效） |
+| POST | `/api/v1/reviewers/{id}/password` | 重置密码；旧会话与旧密码同时失效 |
+| DELETE | `/api/v1/reviewers/{id}` | 删除审核账号（令牌等数据级联清理） |
+
+> 该组接口只认 `role=reviewer` 的账号，对其它角色一律 404（既防误伤普通用户，也防探测）。
 
 ### 职位
 | 方法 | 路径 | 说明 |
@@ -247,13 +264,15 @@ curl -s -X POST $B/applications/$AID/status -H "Authorization: Bearer $HT" \
 cargo test                    # 全部（自动读取 .env 里的 DATABASE_URL）
 cargo test auth::             # 只跑鉴权
 cargo test complaints::       # 只跑举报审核
+cargo test reviewers::        # 只跑审核账号
 cargo test jobs_order::       # 只跑职位列表排序
 ```
 
 | 模块 | 用例要点 |
 | --- | --- |
-| 鉴权 `tests/auth.rs` | 令牌（缺失/伪造/登出/账号被禁用 一律 401）、注册校验与重复手机号 409、**admin 不可自助注册**、登录错误不区分账号是否存在且连续失败 429、角色门禁（求职者不能发职位）、`/users` 越权（非管理员 403、查他人 404、本人可查改自己）、管理员引导的幂等与「绝不提权」 |
-| 举报审核 `tests/complaints.rs` | 发起前置条件（必须沟通过 / 证据 ≥20 字 / 仅求职者）、审核权限（仅 admin）、**通过后企业投诉次数 +1 且职位列表里该企业降档**、驳回计数与顺序不变、重复审核 409、备注超长 400、可见范围与 `?status=` 过滤 |
+| 鉴权 `tests/auth.rs` | 令牌（缺失/伪造/登出/账号被禁用 一律 401）、注册校验与重复手机号 409、**admin/reviewer 不可自助注册**、登录错误不区分账号是否存在且连续失败 429、角色门禁（求职者不能发职位）、`/users` 越权（非管理员 403、查他人 404、本人可查改自己）、管理员引导的幂等与「绝不提权」 |
+| 举报审核 `tests/complaints.rs` | 发起前置条件（必须沟通过 / 证据 ≥20 字 / 仅求职者）、审核权限（仅审核账号或 admin）、**通过后企业投诉次数 +1 且职位列表里该企业降档**、驳回计数与顺序不变、重复审核 409、备注超长 400、可见范围与 `?status=` 过滤 |
+| 审核账号 `tests/reviewers.rs` | admin 创建后可用初始密码登录并审核（留痕 `reviewedByName`）、管理接口仅 admin（审核账号自身也 403）、只认 reviewer 角色（对其它角色 404）、禁用即踢下线、改密撤销旧会话、删除清理账号、**多审核账号并行在线各审各的**、同一账号多端登录且登出互不影响、单账号被限流不牵连他人 |
 | 列表排序 `tests/jobs_order.rs` | 分页拼接后仍按等级从优到劣（跨页全局有序）、同级按次数与时间、收藏按等级而非收藏时间、本企业职位按发布时间倒序 |
 
 ## 设计要点
@@ -266,13 +285,15 @@ cargo test jobs_order::       # 只跑职位列表排序
 5. `src/openapi.rs` 把 handler 加入 `paths(...)`、类型加入 `schemas(...)`。
 
 ### 权限约定
-- 处理器层用 `user_repo::require_recruiter` / `require_seeker` / `require_admin` 校验角色；
+- 处理器层用 `user_repo::require_recruiter` / `require_seeker` / `require_admin` / `require_reviewer` 校验角色；
 - 招聘者只能操作**本企业**职位/投递（比对 `company_id`）；
 - 求职者只能撤回自己的投递（`withdrawn`），其余状态由招聘者推进；
 - 私有简历对其他角色一律 404；
-- 投诉审核与 `/users` 列表/创建/删除仅 `admin`；用户查询/修改限**本人或 admin**，查他人按 404 处理（不泄露账号存在性）；
-- admin 不能自助注册，只能由服务端 `ADMIN_PHONE`/`ADMIN_PASSWORD` 引导创建，且**不会把同手机号的既有账号提权**；
-- 账号被禁用（`is_active=false`）后：既有令牌**立即失效**（401）、重新登录 403。
+- **平台管理（admin）**：`/reviewers` 全套、`/users` 列表/创建/删除仅 admin；用户查询/修改限**本人或 admin**，查他人按 404 处理（不泄露账号存在性）；
+- **审核账号（reviewer）**：仅投诉队列与审核；不能发职位/投递/维护简历，也不能管理账号（`/reviewers` 403）；admin 作为超级角色可代审；
+- admin 与 reviewer 都不能自助注册：admin 由服务端 `ADMIN_PHONE`/`ADMIN_PASSWORD` 引导创建（**不会把同手机号的既有账号提权**），reviewer 由 admin 创建；
+- 账号被禁用（`is_active=false`）后：既有令牌**立即失效**（401）、重新登录 403；重置审核账号密码同样会撤销其全部会话；
+- 多个审核账号可同时在线（令牌按账号多条并存、登录互不踢），某个账号登录失败被限流也不会牵连其它账号（限流键为「手机号|IP」）。
 
 ### 安全设计
 - **SQL 注入**：所有 SQL 均为 sqlx **编译期字面量 + 参数绑定**（`bind`），禁止动态拼接（sqlx 0.9 对非字面量 SQL 直接编译报错）；用户输入只作为绑定值传入；

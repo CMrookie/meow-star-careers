@@ -130,7 +130,8 @@ pub async fn list_complaints(
         .await?
         .ok_or_else(|| AppError::not_found(format!("user `{}`", auth.user_id)))?;
     let views: Vec<ComplaintView> = match me.role.as_str() {
-        "admin" => complaint_repo::all(&state.pool, query.status.as_deref()).await?,
+        // 审核账号与平台管理员都能看到全部投诉（?status= 过滤待审队列）
+        "admin" | "reviewer" => complaint_repo::all(&state.pool, query.status.as_deref()).await?,
         "recruiter" => {
             let cid = me.company_id.ok_or_else(|| AppError::forbidden("招聘者未绑定企业"))?;
             complaint_repo::for_company(&state.pool, &cid).await?
@@ -146,7 +147,9 @@ pub struct ComplaintQuery {
     pub status: Option<String>,
 }
 
-/// 管理员审核：通过后累计企业投诉次数（立即影响职位列表「投诉等级从优到劣」排序）；驳回不累计
+/// 审核（审核专用账号 reviewer 或平台管理员 admin）：通过后累计企业投诉次数
+/// （立即影响职位列表「投诉等级从优到劣」排序）；驳回不累计。审核人记录在 `reviewedBy`，
+/// 多审核账号并行时可通过 `reviewedByName` 追溯是谁审的。
 #[utoipa::path(
     post,
     path = "/complaints/{id}/review",
@@ -157,7 +160,7 @@ pub struct ComplaintQuery {
         (status = 200, description = "审核结果（approved 已通过 / rejected 已驳回）", body = ComplaintView),
         (status = 400, description = "审核备注超过 500 字符", body = ErrorResponse),
         (status = 401, description = "未认证", body = ErrorResponse),
-        (status = 403, description = "非平台管理员", body = ErrorResponse),
+        (status = 403, description = "既非审核账号也非平台管理员", body = ErrorResponse),
         (status = 404, description = "投诉不存在", body = ErrorResponse),
         (status = 409, description = "该投诉已审核过，请勿重复审核", body = ErrorResponse),
     )
@@ -168,15 +171,19 @@ pub async fn review_complaint(
     path: web::Path<Uuid>,
     payload: web::Json<ReviewComplaint>,
 ) -> ApiResult<HttpResponse> {
-    let admin = user_repo::require_admin(&state.pool, &auth.user_id).await?;
+    let moderator = user_repo::require_reviewer(&state.pool, &auth.user_id).await?;
     let id = path.into_inner();
     let p = payload.into_inner();
     if p.note.as_deref().is_some_and(|note| note.trim().chars().count() > 500) {
         return Err(AppError::bad_request("审核备注不能超过 500 字符"));
     }
     let note = p.note.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let view = complaint_repo::review(&state.pool, &id, &admin.id, p.approved, note)
+    let view = complaint_repo::review(&state.pool, &id, &moderator.id, p.approved, note)
         .await?
         .ok_or_else(|| AppError::not_found(format!("complaint `{id}`")))?;
+    tracing::info!(
+        reviewer_id = %moderator.id, reviewer_role = %moderator.role, complaint_id = %id,
+        approved = p.approved, "投诉审核完成"
+    );
     Ok(HttpResponse::Ok().json(view))
 }

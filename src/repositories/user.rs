@@ -95,7 +95,7 @@ pub async fn require_seeker(pool: &PgPool, user_id: &Uuid) -> ApiResult<User> {
     Ok(user)
 }
 
-/// 必须是平台管理员才放行（投诉审核 / 用户管理等平台级操作）
+/// 必须是平台管理员才放行（账号管理 / 用户管理等平台级操作）
 pub async fn require_admin(pool: &PgPool, user_id: &Uuid) -> ApiResult<User> {
     let user = get(pool, user_id)
         .await?
@@ -104,6 +104,32 @@ pub async fn require_admin(pool: &PgPool, user_id: &Uuid) -> ApiResult<User> {
         return Err(AppError::forbidden("仅平台管理员可执行该操作"));
     }
     Ok(user)
+}
+
+/// 审核权限：审核专用账号（reviewer）或平台管理员（admin，作为超级角色可代审）。
+/// 各审核账号的令牌独立并存，因此可同时在线并行审核。
+pub async fn require_reviewer(pool: &PgPool, user_id: &Uuid) -> ApiResult<User> {
+    let user = get(pool, user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found(format!("user `{user_id}`")))?;
+    if user.role != "reviewer" && user.role != "admin" {
+        return Err(AppError::forbidden("仅审核账号或平台管理员可执行该操作"));
+    }
+    Ok(user)
+}
+
+/// 按角色列出账号（审核账号管理用），按创建时间升序
+pub async fn list_by_role(pool: &PgPool, role: &str) -> ApiResult<Vec<User>> {
+    let users = sqlx::query_as::<_, User>(
+        "SELECT id, email, name, is_active, role, company_id, created_at, updated_at, phone
+           FROM users
+          WHERE role = $1
+          ORDER BY created_at",
+    )
+    .bind(role)
+    .fetch_all(pool)
+    .await?;
+    Ok(users)
 }
 
 /// 某企业全部招聘者（用于投递状态/面试变更实时推送）

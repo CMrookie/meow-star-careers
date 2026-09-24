@@ -11,10 +11,12 @@ async fn get_view(pool: &PgPool, id: &Uuid) -> ApiResult<Option<ComplaintView>> 
         "SELECT cp.id, cp.company_id, c.name AS company_name,
                 cp.complainant_id, u.name AS complainant_name,
                 cp.evidence, cp.status, cp.review_note, cp.reviewed_by,
+                reviewer.name AS reviewed_by_name,
                 cp.created_at, cp.reviewed_at, cp.updated_at
            FROM complaints cp
            JOIN companies c ON c.id = cp.company_id
            JOIN users u ON u.id = cp.complainant_id
+           LEFT JOIN users reviewer ON reviewer.id = cp.reviewed_by
           WHERE cp.id = $1",
     )
     .bind(id)
@@ -75,10 +77,12 @@ pub async fn mine(pool: &PgPool, complainant: &Uuid) -> ApiResult<Vec<ComplaintV
         "SELECT cp.id, cp.company_id, c.name AS company_name,
                 cp.complainant_id, u.name AS complainant_name,
                 cp.evidence, cp.status, cp.review_note, cp.reviewed_by,
+                reviewer.name AS reviewed_by_name,
                 cp.created_at, cp.reviewed_at, cp.updated_at
            FROM complaints cp
            JOIN companies c ON c.id = cp.company_id
            JOIN users u ON u.id = cp.complainant_id
+           LEFT JOIN users reviewer ON reviewer.id = cp.reviewed_by
           WHERE cp.complainant_id = $1
           ORDER BY cp.created_at DESC",
     )
@@ -93,10 +97,12 @@ pub async fn for_company(pool: &PgPool, company_id: &Uuid) -> ApiResult<Vec<Comp
         "SELECT cp.id, cp.company_id, c.name AS company_name,
                 cp.complainant_id, u.name AS complainant_name,
                 cp.evidence, cp.status, cp.review_note, cp.reviewed_by,
+                reviewer.name AS reviewed_by_name,
                 cp.created_at, cp.reviewed_at, cp.updated_at
            FROM complaints cp
            JOIN companies c ON c.id = cp.company_id
            JOIN users u ON u.id = cp.complainant_id
+           LEFT JOIN users reviewer ON reviewer.id = cp.reviewed_by
           WHERE cp.company_id = $1
           ORDER BY cp.created_at DESC",
     )
@@ -111,10 +117,12 @@ pub async fn all(pool: &PgPool, status: Option<&str>) -> ApiResult<Vec<Complaint
         "SELECT cp.id, cp.company_id, c.name AS company_name,
                 cp.complainant_id, u.name AS complainant_name,
                 cp.evidence, cp.status, cp.review_note, cp.reviewed_by,
+                reviewer.name AS reviewed_by_name,
                 cp.created_at, cp.reviewed_at, cp.updated_at
            FROM complaints cp
            JOIN companies c ON c.id = cp.company_id
            JOIN users u ON u.id = cp.complainant_id
+           LEFT JOIN users reviewer ON reviewer.id = cp.reviewed_by
           WHERE ($1::text IS NULL OR cp.status = $1)
           ORDER BY cp.created_at DESC",
     )

@@ -19,6 +19,8 @@ pub struct ComplaintView {
     pub status: String,
     pub review_note: Option<String>,
     pub reviewed_by: Option<Uuid>,
+    /// 审核人姓名（多审核账号并行时用于留痕；未审核为 null）
+    pub reviewed_by_name: Option<String>,
     pub created_at: DateTime<Utc>,
     pub reviewed_at: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,

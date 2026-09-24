@@ -24,11 +24,19 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 }
 
 fn validate_register(payload: &RegisterRequest) -> Result<(), AppError> {
-    // 管理员只能由服务端引导创建：注册接口显式拒绝，避免通过公开接口提权
-    if payload.role == Role::Admin {
-        return Err(AppError::bad_request(
-            "admin 账号不可自助注册（由服务端 ADMIN_PHONE / ADMIN_PASSWORD 引导创建）",
-        ));
+    // 平台管理与审核账号均不可自助注册：避免通过公开接口提权
+    match payload.role {
+        Role::Admin => {
+            return Err(AppError::bad_request(
+                "admin 账号不可自助注册（由服务端 ADMIN_PHONE / ADMIN_PASSWORD 引导创建）",
+            ));
+        }
+        Role::Reviewer => {
+            return Err(AppError::bad_request(
+                "reviewer 审核账号不可自助注册（由平台管理员在 /reviewers 创建）",
+            ));
+        }
+        Role::Seeker | Role::Recruiter => {}
     }
     let phone = payload.phone.trim();
     if !security::is_valid_cn_phone(phone) {
@@ -99,6 +107,11 @@ pub async fn register(
         Role::Admin => {
             return Err(AppError::bad_request(
                 "admin 账号不可自助注册（由服务端 ADMIN_PHONE / ADMIN_PASSWORD 引导创建）",
+            ));
+        }
+        Role::Reviewer => {
+            return Err(AppError::bad_request(
+                "reviewer 审核账号不可自助注册（由平台管理员在 /reviewers 创建）",
             ));
         }
     };

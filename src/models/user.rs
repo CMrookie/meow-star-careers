@@ -15,7 +15,7 @@ pub struct User {
     pub email: Option<String>,
     pub name: String,
     pub is_active: bool,
-    /// seeker=求职者 / recruiter=招聘者
+    /// seeker=求职者 / recruiter=招聘者 / admin=平台管理 / reviewer=审核专用账号（admin 创建）
     pub role: String,
     /// 招聘者所属企业（求职者为 null）
     pub company_id: Option<Uuid>,
@@ -51,4 +51,32 @@ pub struct UpdateUser {
     pub name: Option<String>,
     #[schema(example = false)]
     pub is_active: Option<bool>,
+}
+
+/// 新建审核专用账号（仅平台管理员；手机号 + 初始密码，登录后可改密）
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewReviewer {
+    #[schema(example = "13700000001", min_length = 11, max_length = 11)]
+    pub phone: String,
+    #[schema(example = "审核员小王")]
+    pub name: String,
+    #[schema(example = "secret123", min_length = 8)]
+    pub password: String,
+}
+
+/// 重置审核账号密码（仅平台管理员；重置后该账号已登录的全部会话立即失效）
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetPassword {
+    #[schema(example = "secret123", min_length = 8)]
+    pub password: String,
+}
+
+/// 启用 / 禁用请求体（审核账号管理）
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetActiveRequest {
+    #[schema(example = false)]
+    pub is_active: bool,
 }

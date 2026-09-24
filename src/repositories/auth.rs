@@ -265,3 +265,50 @@ pub async fn ensure_admin(
 
     Ok(AdminBootstrap::Created)
 }
+
+/// 创建审核专用账号（`role=reviewer`，仅平台管理员调用）。
+/// 手机号唯一冲突由错误转换返回 409；密码由调用方哈希后传入。
+pub async fn create_reviewer(
+    pool: &PgPool,
+    phone: &str,
+    name: &str,
+    password_hash: &str,
+) -> ApiResult<User> {
+    let user = sqlx::query_as::<_, User>(
+        "INSERT INTO users (phone, name, password_hash, role)
+         VALUES ($1, $2, $3, 'reviewer')
+         RETURNING id, email, name, is_active, role, company_id, created_at, updated_at, phone",
+    )
+    .bind(phone.trim())
+    .bind(name.trim())
+    .bind(password_hash)
+    .fetch_one(pool)
+    .await?;
+    Ok(user)
+}
+
+/// 重置密码（审核账号管理用），返回是否命中某行
+pub async fn update_password(pool: &PgPool, user_id: &Uuid, password_hash: &str) -> ApiResult<bool> {
+    let result = sqlx::query(
+        "UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1",
+    )
+    .bind(user_id)
+    .bind(password_hash)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// 撤销某账号的**全部**有效令牌（重置密码 / 禁用账号时强制其重新登录）。
+/// 返回被撤销的会话数；多个审核账号并行在线时互不影响。
+pub async fn revoke_all_tokens(pool: &PgPool, user_id: &Uuid) -> ApiResult<u64> {
+    let result = sqlx::query(
+        "UPDATE auth_tokens
+            SET revoked_at = now()
+          WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}

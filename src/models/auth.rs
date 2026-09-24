@@ -8,9 +8,10 @@ use crate::models::user::User;
 
 /// 用户角色
 ///
-/// `Admin` 仅用于表达数据库/文档里的角色取值：注册接口**拒绝**自助注册管理员，
-/// admin 账号只能由服务端按 `ADMIN_PHONE` / `ADMIN_PASSWORD` 引导创建
-/// （见 `repositories::auth::ensure_admin`）。
+/// `Admin` / `Reviewer` 仅用于表达数据库/文档里的角色取值：注册接口**拒绝**
+/// 自助注册这两种角色 —— admin 由服务端按 `ADMIN_PHONE` / `ADMIN_PASSWORD` 引导创建
+/// （`repositories::auth::ensure_admin`），reviewer（审核专用账号）由平台管理员创建
+/// （`POST /api/v1/reviewers`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
@@ -19,8 +20,10 @@ pub enum Role {
     Seeker,
     /// 招聘者
     Recruiter,
-    /// 平台管理员（不可自助注册；负责投诉审核等平台级操作）
+    /// 平台管理（账号与用户管理；不可自助注册）
     Admin,
+    /// 审核专用账号（投诉审核；不可自助注册，由 admin 创建）
+    Reviewer,
 }
 
 impl Role {
@@ -29,6 +32,7 @@ impl Role {
             Self::Seeker => "seeker",
             Self::Recruiter => "recruiter",
             Self::Admin => "admin",
+            Self::Reviewer => "reviewer",
         }
     }
 }
