@@ -27,7 +27,8 @@
 │   ├── ...                       # 0007-0012：手机号登录/面试/推送/企业地址/投诉
 │   ├── 0013_complaint_level_order.sql  # 投诉等级函数（列表按等级排序）
 │   ├── 0014_admin_role.sql       # 平台管理角色（admin 不可自助注册）
-│   └── 0015_reviewer_role.sql    # 审核专用账号（reviewer，由 admin 创建管理）
+│   ├── 0015_reviewer_role.sql    # 审核专用账号（reviewer，由 admin 创建管理）
+│   └── 0016_complaint_review_lock.sql  # 投诉认领锁 + complaint_views 只读视图
 └── src/
     ├── main.rs                   # 入口（配置/迁移/管理员引导/启动）
     ├── config.rs / logging.rs / db.rs / state.rs
@@ -36,10 +37,10 @@
     ├── error.rs                  # 统一错误
     ├── ws.rs                     # WebSocket 实时中枢（私聊）
     ├── openapi.rs / app.rs
-    ├── models/     # user/auth/chat/company/job/resume/application/complaint/pagination
-    ├── repositories/  # user/auth/chat/company/job/resume/application/complaint
-    ├── handlers/     # health/auth/users/reviewers/companies/jobs/resumes/applications/chat/complaints
-    └── tests/        # 集成测试：鉴权 / 举报审核 / 审核账号 / 列表排序（sqlx::test 独立库）
+    ├── models/     # user/auth/chat/company/job/resume/application/complaint/pagination/stats
+    ├── repositories/  # user/auth/chat/company/job/resume/application/complaint/stats
+    ├── handlers/     # health/auth/users/reviewers/companies/jobs/resumes/applications/chat/complaints/stats
+    └── tests/        # 集成测试：鉴权 / 举报审核 / 审核账号 / 并行锁定 / 平台统计 / 列表排序
 ```
 
 ## 快速开始
@@ -113,7 +114,9 @@ cargo run                       # 启动时自动执行迁移（建表 + COMMENT
 | POST | `/api/v1/companies/{id}/complaints` | 发起投诉（求职者；**须与该企业有过实际沟通**，证据 20-5000 字） |
 | GET | `/api/v1/complaints/mine` | 我发起的投诉 |
 | GET | `/api/v1/complaints` | 审核账号/管理员=全部（`?status=pending/approved/rejected`）、招聘者=本企业、求职者=本人 |
-| POST | `/api/v1/complaints/{id}/review` | **审核账号或管理员**审核 `{approved, note?}`：通过才累计企业投诉次数（影响职位列表排序），驳回不累计；重复审核 409；留痕 `reviewedBy`/`reviewedByName` |
+| POST | `/api/v1/complaints/{id}/claim` | **认领即锁定**：多审核并行时同一条只允许一个持锁人；重复调用=续约（租约 10 分钟） |
+| POST | `/api/v1/complaints/{id}/release` | 释放认领锁：本人释放；`?force=true` 仅管理员（强制解锁他人）；已过期的锁任何人可清理 |
+| POST | `/api/v1/complaints/{id}/review` | **审核账号或管理员**审核 `{approved, note?}`：通过才累计企业投诉次数（影响职位列表排序），驳回不累计；重复审核 409；**被他人持锁时 409**；留痕 `reviewedBy`/`reviewedByName` |
 
 ### 审核账号管理（仅平台管理员）
 | 方法 | 路径 | 说明 |
@@ -123,6 +126,17 @@ cargo run                       # 启动时自动执行迁移（建表 + COMMENT
 | POST | `/api/v1/reviewers/{id}/active` | 启用/禁用 `{isActive}`；禁用**立即踢下线**（既有会话全部失效） |
 | POST | `/api/v1/reviewers/{id}/password` | 重置密码；旧会话与旧密码同时失效 |
 | DELETE | `/api/v1/reviewers/{id}` | 删除审核账号（令牌等数据级联清理） |
+
+### 平台统计
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/stats/review` | 待审队列概览（待审/处理中/锁过期/超时/最久等待）+ 审核账号工作量。**管理员=全部审核账号，审核账号=只有自己** |
+| GET | `/api/v1/stats/companies` | 用人单位优劣（`?limit=` 默认 200）：投诉结构、职位规模、等级序、每在招职位投诉率、综合质量分；**最差在前** |
+| GET | `/api/v1/stats/seekers` | 求职用户分析：账号规模与活跃、近 12 个月注册趋势、简历/投递参与度、投递状态与分档分布 |
+
+> **审核只记录及时性**：`/stats/review` 返回的是「提交→审结」总时长、「认领→审结」处理时长、
+> 及时率（及时线 24h）与队列积压；**刻意不返回通过/驳回数量与结论分布**，避免用审核结论去评价审核人员。
+> `/stats/companies` 与 `/stats/seekers` 只返回**聚合值**，不返回任何用户明细。
 
 > 该组接口只认 `role=reviewer` 的账号，对其它角色一律 404（既防误伤普通用户，也防探测）。
 
@@ -265,6 +279,8 @@ cargo test                    # 全部（自动读取 .env 里的 DATABASE_URL�
 cargo test auth::             # 只跑鉴权
 cargo test complaints::       # 只跑举报审核
 cargo test reviewers::        # 只跑审核账号
+cargo test review_locks::     # 只跑并行锁定
+cargo test stats::            # 只跑平台统计
 cargo test jobs_order::       # 只跑职位列表排序
 ```
 
@@ -273,6 +289,8 @@ cargo test jobs_order::       # 只跑职位列表排序
 | 鉴权 `tests/auth.rs` | 令牌（缺失/伪造/登出/账号被禁用 一律 401）、注册校验与重复手机号 409、**admin/reviewer 不可自助注册**、登录错误不区分账号是否存在且连续失败 429、角色门禁（求职者不能发职位）、`/users` 越权（非管理员 403、查他人 404、本人可查改自己）、管理员引导的幂等与「绝不提权」 |
 | 举报审核 `tests/complaints.rs` | 发起前置条件（必须沟通过 / 证据 ≥20 字 / 仅求职者）、审核权限（仅审核账号或 admin）、**通过后企业投诉次数 +1 且职位列表里该企业降档**、驳回计数与顺序不变、重复审核 409、备注超长 400、可见范围与 `?status=` 过滤 |
 | 审核账号 `tests/reviewers.rs` | admin 创建后可用初始密码登录并审核（留痕 `reviewedByName`）、管理接口仅 admin（审核账号自身也 403）、只认 reviewer 角色（对其它角色 404）、禁用即踢下线、改密撤销旧会话、删除清理账号、**多审核账号并行在线各审各的**、同一账号多端登录且登出互不影响、单账号被限流不牵连他人 |
+| 并行锁定 `tests/review_locks.rs` | 认领成功并返回锁状态、他人认领 409（报错含持锁人）、本人重复认领=续约（不改写 lockedAt）、锁过期后可被抢占、释放规则（本人可 / 他人 403 / 非管理员 force 403 / 管理员 force 可 / 过期任何人可清理）、他人持锁时审结 409、无锁直审补记接单时间、并发重复审结第二个 409、业务角色不能认领 |
+| 平台统计 `tests/stats.rs` | 管理员看全部审核账号而审核账号只看自己、业务角色 403、未认证 401、**及时率口径**（2h 及时 + 48h 超时 → 0.5 且无结论类字段）、公司列表最差在前与质量分公式 `100-已核实*10-待审*2`、求职统计聚合（简历/投递/分档/参与度） |
 | 列表排序 `tests/jobs_order.rs` | 分页拼接后仍按等级从优到劣（跨页全局有序）、同级按次数与时间、收藏按等级而非收藏时间、本企业职位按发布时间倒序 |
 
 ## 设计要点
@@ -293,7 +311,9 @@ cargo test jobs_order::       # 只跑职位列表排序
 - **审核账号（reviewer）**：仅投诉队列与审核；不能发职位/投递/维护简历，也不能管理账号（`/reviewers` 403）；admin 作为超级角色可代审；
 - admin 与 reviewer 都不能自助注册：admin 由服务端 `ADMIN_PHONE`/`ADMIN_PASSWORD` 引导创建（**不会把同手机号的既有账号提权**），reviewer 由 admin 创建；
 - 账号被禁用（`is_active=false`）后：既有令牌**立即失效**（401）、重新登录 403；重置审核账号密码同样会撤销其全部会话；
-- 多个审核账号可同时在线（令牌按账号多条并存、登录互不踢），某个账号登录失败被限流也不会牵连其它账号（限流键为「手机号|IP」）。
+- 多个审核账号可同时在线（令牌按账号多条并存、登录互不踢），某个账号登录失败被限流也不会牵连其它账号（限流键为「手机号|IP」）；
+- **并行审理由认领锁保证**：`claim` 用条件 UPDATE（空闲 OR 自己 OR 已过期）抢占，只有一人能成功；`review` 同样要求「未被他人有效锁定」并用条件 UPDATE 兜底并发重复提交；审结会清空锁但保留 `review_started_at`；
+- **统计可见范围**：`/stats/review` 对审核账号只返回其本人（看板不互相暴露同事数据）；`/stats/companies` 与 `/stats/seekers` 仅 admin。
 
 ### 安全设计
 - **SQL 注入**：所有 SQL 均为 sqlx **编译期字面量 + 参数绑定**（`bind`），禁止动态拼接（sqlx 0.9 对非字面量 SQL 直接编译报错）；用户输入只作为绑定值传入；

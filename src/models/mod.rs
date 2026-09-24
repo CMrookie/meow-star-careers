@@ -9,4 +9,5 @@ pub mod interview;
 pub mod job;
 pub mod pagination;
 pub mod resume;
+pub mod stats;
 pub mod user;

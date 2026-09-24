@@ -11,6 +11,7 @@ pub mod jobs;
 pub mod push;
 pub mod reviewers;
 pub mod resumes;
+pub mod stats;
 pub mod users;
 
 use actix_web::HttpResponse;

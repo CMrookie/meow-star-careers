@@ -18,6 +18,10 @@ use crate::models::company::{Company, NewCompany};
 use crate::models::interview::{InterviewView, NewInterview};
 use crate::models::job::{JobPage, JobView, NewJob, UpdateJob};
 use crate::models::resume::{Resume, ResumePage, ResumeWrite};
+use crate::models::stats::{
+    BucketCount, CompanyQuality, MonthlyCount, ReviewQueue, ReviewStats, ReviewerWorkload,
+    SeekerOverview, SeekerStats, StatusCount,
+};
 use crate::models::user::{NewReviewer, NewUser, ResetPassword, SetActiveRequest, UpdateUser, User, UserPublic};
 
 #[derive(OpenApi)]
@@ -84,7 +88,13 @@ use crate::models::user::{NewReviewer, NewUser, ResetPassword, SetActiveRequest,
         crate::handlers::complaints::create_complaint,
         crate::handlers::complaints::my_complaints,
         crate::handlers::complaints::list_complaints,
+        crate::handlers::complaints::claim_complaint,
+        crate::handlers::complaints::release_complaint,
         crate::handlers::complaints::review_complaint,
+        // 平台统计（审核及时性 / 用人单位优劣 / 求职用户）
+        crate::handlers::stats::review_stats,
+        crate::handlers::stats::company_stats,
+        crate::handlers::stats::seeker_stats,
         // 审核专用账号管理（仅平台管理员）
         crate::handlers::reviewers::list_reviewers,
         crate::handlers::reviewers::create_reviewer,
@@ -124,6 +134,15 @@ use crate::models::user::{NewReviewer, NewUser, ResetPassword, SetActiveRequest,
             ComplaintView,
             CreateComplaint,
             ReviewComplaint,
+            ReviewStats,
+            ReviewQueue,
+            ReviewerWorkload,
+            CompanyQuality,
+            SeekerStats,
+            SeekerOverview,
+            MonthlyCount,
+            StatusCount,
+            BucketCount,
             NewReviewer,
             ResetPassword,
             SetActiveRequest,
@@ -142,6 +161,7 @@ use crate::models::user::{NewReviewer, NewUser, ResetPassword, SetActiveRequest,
         (name = "interview", description = "线上视频面试（房间/状态/信令经 WS 转发）"),
         (name = "complaint", description = "投诉（举报）与审核（审核账号 / 平台管理员）"),
         (name = "reviewer", description = "审核专用账号管理（仅平台管理员）"),
+        (name = "stats", description = "平台统计：审核及时性 / 用人单位优劣 / 求职用户分析"),
     ),
     modifiers(&SecurityAddon)
 )]

@@ -66,6 +66,7 @@ pub fn create_app(
                 .configure(handlers::interviews::configure)
                 .configure(handlers::push::configure)
                 .configure(handlers::complaints::configure)
+                .configure(handlers::stats::configure)
                 // 审核专用账号管理（仅平台管理员）
                 .configure(handlers::reviewers::configure)
                 .configure(handlers::jobs::configure)
