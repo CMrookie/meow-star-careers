@@ -1,6 +1,6 @@
-# 招聘求职系统服务端
+# meow-star-careers · 招聘求职系统服务端
 
-模块化的 **Actix Web + PostgreSQL** 招聘求职平台后端：注册登录（求职者/招聘者）、职位发布与搜索、简历管理、在线投递与状态流转、职位收藏，另含一对一实时私聊。
+**meow-star-careers** 是模块化的 **Actix Web + PostgreSQL** 招聘求职平台后端：注册登录（求职者/招聘者/审核账号）、职位发布与搜索、简历管理、在线投递与状态流转、职位收藏、投诉（举报）与审核，另含一对一实时私聊。
 
 - 框架：actix-web 4（Rust 2024 edition），WebSocket 使用官方 actix-ws（无 actor 流式方案）
 - 数据库：PostgreSQL，通过 sqlx（连接池 + 内嵌迁移）

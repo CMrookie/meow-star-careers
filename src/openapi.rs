@@ -27,8 +27,8 @@ use crate::models::user::{NewReviewer, NewUser, ResetPassword, SetActiveRequest,
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "招聘求职系统 API",
-        description = "基于 actix-web + PostgreSQL 的招聘求职平台服务端：注册登录（Bearer Token）、职位发布与搜索、简历管理、在线投递与状态流转、职位收藏；另含一对一私聊（REST + WebSocket）。统一错误处理、结构化日志、自动生成 API 文档。",
+        title = "meow-star-careers API",
+        description = "meow-star-careers（招聘求职系统）服务端：基于 actix-web + PostgreSQL 的招聘求职平台后端。注册登录（Bearer Token）、职位发布与搜索、简历管理、在线投递与状态流转、职位收藏、投诉（举报）与审核账号管理；另含一对一私聊（REST + WebSocket）。统一错误处理、结构化日志、自动生成 API 文档。",
         version = "0.3.0",
     ),
     paths(

@@ -22,6 +22,12 @@ async fn healthz_public_and_business_endpoints_need_token(pool: PgPool) {
     let (status, _) = call!(app, request(Method::GET, "/healthz", None));
     assert_eq!(status, StatusCode::OK);
 
+    // 服务索引用 Cargo 包名回报项目名（改名回归：just-a-work -> meow-star-careers）
+    let (status, index) = call!(app, request(Method::GET, "/", None));
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(index["service"], json!("meow-star-careers"));
+    assert_eq!(index["docs"], json!("/swagger-ui/"));
+
     // 无令牌 / 伪造令牌：一律 401
     let (status, _) = call!(app, request(Method::GET, "/api/v1/jobs", None));
     assert_eq!(status, StatusCode::UNAUTHORIZED);

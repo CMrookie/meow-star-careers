@@ -1,8 +1,8 @@
 [package]
-name = "just-a-work"
+name = "meow-star-careers"
 version = "0.1.0"
 edition = "2024"
-description = "Modular actix-web + PostgreSQL API server with OpenAPI docs, unified error handling and structured logging"
+description = "meow-star-careers：招聘求职系统服务端（actix-web + PostgreSQL，OpenAPI 文档、统一错误处理与结构化日志）"
 
 [dependencies]
 actix-web = { version = "4", features = ["macros", "ws"] }
