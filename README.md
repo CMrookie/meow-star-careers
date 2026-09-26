@@ -346,3 +346,14 @@ docker exec pgdb psql -U postgres -h 127.0.0.1 -c 'CREATE DATABASE appdb OWNER p
 ## 生产注意
 - 远程（SSL）PostgreSQL 需给 sqlx 加 TLS feature（见 README 版本说明）；
 - 令牌每请求查库，量大时可换 JWT 或加缓存；搜索量级上来后可加 GIN 全文索引/专用引擎。
+
+---
+
+## 相关仓库
+
+这是三端招聘平台的其中一端，另外两端：
+
+- **后台管理系统（Vue3 + TypeScript）**：[GitHub](https://github.com/CMrookie/meow-star-careers-admin) ｜ [Gitee](https://gitee.com/rookie_c/meow-star-careers-admin)
+- **移动端 App（Flutter）**：[GitHub](https://github.com/CMrookie/meow_star_careers_app) ｜ [Gitee](https://gitee.com/rookie_c/meow_star_careers_app)
+
+> 三端共用一套接口契约与角色模型（seeker / recruiter / reviewer / admin），由 OpenAPI 定义。
