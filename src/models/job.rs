@@ -36,6 +36,14 @@ pub struct JobView {
     /// 投诉定级 v2 的分母：>=50 人时按每百人投诉率定级，否则退回次数口径
     /// （与求职 App 的 `companyStaffSize` 字段一一对应）。
     pub company_staff_size: Option<i32>,
+    /// 投诉等级（**服务端算好**）：excellent / minor / alert / warning / severe。
+    /// 客户端直接渲染，不再自行判定 —— 规则单一来源见
+    /// `migrations/0018_complaint_rule_single_source.sql` 与 `GET /complaint-rules`。
+    pub complaint_level: String,
+    /// 定级所用口径：rate（按每百人投诉率）/ count（未申报规模或规模过小时按次数兜底）
+    pub complaint_basis: String,
+    /// 每百人投诉率（%）；按次数口径时为 null
+    pub complaint_rate_percent: Option<f64>,
 }
 
 /// 创建职位

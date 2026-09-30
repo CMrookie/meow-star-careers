@@ -15,7 +15,9 @@ use uuid::Uuid;
 
 use crate::auth::AuthenticatedUser;
 use crate::error::{ApiResult, AppError, ErrorResponse};
-use crate::models::complaint::{ComplaintView, CreateComplaint, ReleaseLockQuery, ReviewComplaint};
+use crate::models::complaint::{
+    ComplaintRules, ComplaintView, CreateComplaint, ReleaseLockQuery, ReviewComplaint,
+};
 use crate::repositories;
 use crate::repositories::complaint as complaint_repo;
 use crate::repositories::user as user_repo;
@@ -29,7 +31,9 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/{id}/claim", web::post().to(claim_complaint))
             .route("/{id}/release", web::post().to(release_complaint))
             .route("/{id}/review", web::post().to(review_complaint)),
-    );
+    )
+    // 定级规则（单一来源）：阈值与排序、JobView 字段同源，供客户端渲染规则页
+    .route("/complaint-rules", web::get().to(complaint_rules));
 }
 
 /// 投诉审核状态取值（与 0012_complaints.sql 的 CHECK 约束一致）
@@ -261,4 +265,26 @@ pub async fn review_complaint(
         .await?
         .ok_or_else(|| AppError::not_found(format!("complaint `{id}`")))?;
     Ok(HttpResponse::Ok().json(view))
+}
+
+/// 投诉定级规则（服务端单一来源）
+///
+/// 返回的阈值与 `GET /jobs` 里 `complaintLevel` 的判定、以及列表排序所用规则**完全同源**
+/// （都来自数据库的 `complaint_rule_*` 函数），客户端不再自己维护这份数字。
+#[utoipa::path(
+    get,
+    path = "/complaint-rules",
+    tag = "complaint",
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "定级规则（版本 / 等级序列 / 规模阈值 / 率与次数阈值）", body = ComplaintRules),
+        (status = 401, description = "未认证", body = ErrorResponse),
+    )
+)]
+pub async fn complaint_rules(
+    state: web::Data<AppState>,
+    _auth: AuthenticatedUser,
+) -> ApiResult<HttpResponse> {
+    let rules = complaint_repo::rules(&state.pool).await?;
+    Ok(HttpResponse::Ok().json(rules))
 }

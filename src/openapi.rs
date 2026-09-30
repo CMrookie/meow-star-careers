@@ -13,7 +13,7 @@ use crate::models::application::{
 };
 use crate::models::auth::{AuthResponse, LoginRequest, RegisterRequest, Role};
 use crate::models::chat::{ConversationSummary, Message, NewMessage, StartConversationRequest};
-use crate::models::complaint::{ComplaintView, CreateComplaint, ReviewComplaint};
+use crate::models::complaint::{ComplaintRules, ComplaintView, CreateComplaint, ReviewComplaint};
 use crate::models::company::{Company, NewCompany};
 use crate::models::interview::{InterviewView, NewInterview};
 use crate::models::job::{JobPage, JobView, NewJob, UpdateJob};
@@ -91,6 +91,7 @@ use crate::models::user::{NewReviewer, NewUser, ResetPassword, SetActiveRequest,
         crate::handlers::complaints::claim_complaint,
         crate::handlers::complaints::release_complaint,
         crate::handlers::complaints::review_complaint,
+        crate::handlers::complaints::complaint_rules,
         // 平台统计（审核及时性 / 用人单位优劣 / 求职用户）
         crate::handlers::stats::review_stats,
         crate::handlers::stats::company_stats,
@@ -132,6 +133,7 @@ use crate::models::user::{NewReviewer, NewUser, ResetPassword, SetActiveRequest,
             StartConversationRequest,
             NewMessage,
             ComplaintView,
+            ComplaintRules,
             CreateComplaint,
             ReviewComplaint,
             ReviewStats,

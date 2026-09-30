@@ -289,3 +289,147 @@ async fn staff_size_validation_on_recruiter_registration(pool: PgPool) {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(rank(&pool, 1, Some(0)).await, 1, "规模 0 走次数口径：1 次 -> 轻微");
 }
+
+/// 仅凭 `GET /complaint-rules` 返回的数字，复现一次客户端定级
+/// （用来证明「单一来源」：客户端不需要自己维护阈值表）
+fn client_level_from_rules(
+    rules: &serde_json::Value,
+    complaints: i64,
+    staff_size: Option<i64>,
+) -> String {
+    let levels: Vec<String> = rules["levels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let min_staff = rules["minStaffSizeForRate"].as_i64().unwrap();
+    let rate_thresholds: Vec<f64> = rules["rateThresholds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    let count_thresholds: Vec<i64> = rules["countThresholds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_i64().unwrap())
+        .collect();
+
+    let rank = if complaints <= 0 {
+        0
+    } else if let Some(size) = staff_size.filter(|s| *s >= min_staff) {
+        let rate = complaints as f64 * 100.0 / size as f64;
+        if rate > rate_thresholds[2] {
+            4
+        } else if rate > rate_thresholds[1] {
+            3
+        } else if rate > rate_thresholds[0] {
+            2
+        } else {
+            1
+        }
+    } else {
+        count_thresholds
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| **t <= complaints)
+            .map(|(i, _)| i)
+            .next_back()
+            .unwrap()
+    };
+    levels[rank].clone()
+}
+
+#[sqlx::test]
+async fn rules_endpoint_is_single_source_of_truth(pool: PgPool) {
+    // 覆盖五种等级 + 两种口径
+    let cases: &[(&str, i32, Option<i32>, &str, &str)] = &[
+        ("规则-零投诉大厂", 0, Some(2000), "excellent", "rate"),
+        ("规则-大厂20次", 20, Some(2000), "alert", "rate"),   // 1.0%
+        ("规则-小厂3次", 3, Some(60), "severe", "rate"),      // 5.0%
+        ("规则-未申报4次", 4, None, "alert", "count"),        // 次数口径 3-5
+        ("规则-微型20次", 20, Some(20), "severe", "count"),   // 规模过小 -> 次数口径
+        ("规则-大厂3次", 3, Some(5000), "minor", "rate"),     // 0.06%
+    ];
+    for (name, complaints, staff, _, _) in cases {
+        let company = common::seed_company_sized(&pool, name, *complaints, *staff).await;
+        common::seed_job(&pool, &company, &format!("职位 {name}"), common::days_ago(1)).await;
+    }
+
+    let (_, token) = common::seeker(&pool, "13800000001").await;
+    let app = test::init_service(crate::app::create_app(common::state(pool))).await;
+
+    // 1) 规则接口：数字与语义
+    let (status, rules) = call!(
+        app,
+        request(Method::GET, "/api/v1/complaint-rules", Some(&token))
+    );
+    assert_eq!(status, StatusCode::OK, "{rules}");
+    assert_eq!(rules["version"], json!("v2"));
+    assert_eq!(
+        rules["levels"],
+        json!(["excellent", "minor", "alert", "warning", "severe"])
+    );
+    assert_eq!(rules["minStaffSizeForRate"], json!(50));
+    assert_eq!(rules["rateThresholds"], json!([0.5, 1.5, 3.0]));
+    assert_eq!(rules["countThresholds"], json!([0, 1, 3, 6, 10]));
+    // 未认证不可读
+    let (status, _) = call!(app, request(Method::GET, "/api/v1/complaint-rules", None));
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // 2) 服务端在职位视图里算好的等级/口径/率，与用例期望一致
+    let (status, body) = call!(app, request(Method::GET, "/api/v1/jobs", Some(&token)));
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), cases.len());
+    for (name, complaints, staff, expected_level, expected_basis) in cases {
+        let job = items
+            .iter()
+            .find(|j| j["title"] == json!(format!("职位 {name}")))
+            .unwrap_or_else(|| panic!("找不到 {name}: {body}"));
+        assert_eq!(job["complaintsCount"], json!(complaints));
+        assert_eq!(
+            job["companyStaffSize"],
+            match staff {
+                Some(size) => json!(size),
+                None => serde_json::Value::Null,
+            }
+        );
+        assert_eq!(job["complaintLevel"], json!(expected_level), "{name}");
+        assert_eq!(job["complaintBasis"], json!(expected_basis), "{name}");
+        // 率口径要给出百分比，次数口径为 null
+        if *expected_basis == "rate" {
+            let rate = job["complaintRatePercent"].as_f64().unwrap();
+            let expect = *complaints as f64 * 100.0 / staff.unwrap() as f64;
+            assert!((rate - expect).abs() < 1e-9, "{name}: {rate} != {expect}");
+        } else {
+            assert!(job["complaintRatePercent"].is_null(), "{name}");
+        }
+
+        // 3) 「单一来源」：只拿规则接口的数字，也能算出同一个等级
+        let reproduced = client_level_from_rules(&rules, *complaints as i64, staff.map(|s| s as i64));
+        assert_eq!(
+            reproduced, *expected_level,
+            "{name}: 客户端按规则接口复现的等级应与服务端一致"
+        );
+    }
+
+    // 4) 排序与等级一致：返回顺序上的 level 序（index）必须单调不减
+    let order_index: Vec<usize> = items
+        .iter()
+        .map(|j| {
+            rules["levels"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .position(|l| l == &j["complaintLevel"])
+                .unwrap()
+        })
+        .collect();
+    assert!(
+        order_index.windows(2).all(|w| w[0] <= w[1]),
+        "排序必须与等级一致：{order_index:?}"
+    );
+}

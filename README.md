@@ -29,7 +29,9 @@
 │   ├── 0014_admin_role.sql       # 平台管理角色（admin 不可自助注册）
 │   ├── 0015_reviewer_role.sql    # 审核专用账号（reviewer，由 admin 创建管理）
 │   ├── 0016_complaint_review_lock.sql  # 投诉认领锁 + complaint_views 只读视图
-│   └── 0017_company_staff_size.sql     # 企业规模 + 定级 v2（每百人投诉率）
+│   ├── 0017_company_staff_size.sql     # 企业规模 + 定级 v2（每百人投诉率）
+│   ├── 0018_complaint_rule_single_source.sql  # 定级规则单一来源（规则函数 + 等级/口径函数）
+│   └── 0019_backfill_staff_size.sql    # 补历史联调数据缺失的企业规模
 └── src/
     ├── main.rs                   # 入口（配置/迁移/管理员引导/启动）
     ├── config.rs / logging.rs / db.rs / state.rs
@@ -119,6 +121,7 @@ cargo run                       # 启动时自动执行迁移（建表 + COMMENT
 | GET | `/api/v1/complaints` | 审核账号/管理员=全部（`?status=pending/approved/rejected`）、招聘者=本企业、求职者=本人 |
 | POST | `/api/v1/complaints/{id}/claim` | **认领即锁定**：多审核并行时同一条只允许一个持锁人；重复调用=续约（租约 10 分钟） |
 | POST | `/api/v1/complaints/{id}/release` | 释放认领锁：本人释放；`?force=true` 仅管理员（强制解锁他人）；已过期的锁任何人可清理 |
+| GET | `/api/v1/complaint-rules` | 定级规则（单一来源）：`version` / `levels` / `minStaffSizeForRate` / `rateThresholds` / `countThresholds` |
 | POST | `/api/v1/complaints/{id}/review` | **审核账号或管理员**审核 `{approved, note?}`：通过才累计企业投诉次数（影响职位列表排序），驳回不累计；重复审核 409；**被他人持锁时 409**；留痕 `reviewedBy`/`reviewedByName` |
 
 ### 审核账号管理（仅平台管理员）
@@ -182,13 +185,15 @@ ORDER BY complaint_level_rank(c.complaints_count, c.staff_size) ASC,   -- 等级
   分母 `companies.staff_size` 是**企业申报**的员工人数（招聘者注册时的 `company.staffSize`，可为空）。
 - 小样本退回次数：规模 < 50 人时「1 起投诉」就能把率抬到 2%+，波动太大容易冤枉小公司，
   因此这一档改用次数定级，并在 App 卡片上标明口径（`basisNote`）。
-- 阈值与口径与求职 App **同一份**：`lib/ui/complaint_level.dart` 的 `assessComplaints` /
-  `complaintRateThresholds = [0.5, 1.5, 3.0]` / `minStaffSizeForRate = 50`；服务端对应
-  `migrations/0017_company_staff_size.sql` 的 `complaint_rate_percent(complaints, staff_size)`
-  与 `complaint_level_rank(complaints, staff_size)`（均 `IMMUTABLE`，可在 `ORDER BY`/过滤/分组复用）。
-  **改一侧必须同步改另一侧**，`tests/complaint_rate.rs` 用边界表把两边钉在一起。
-- 相关响应字段：职位视图带 `companyStaffSize`（未申报为 `null`），企业视图带 `staffSize`
-  —— 与 App 的 `JobView.companyStaffSize` / `Company.staffSize` 一一对应。
+- **规则单一来源（服务端）**：阈值只在 `migrations/0018_complaint_rule_single_source.sql` 的
+  `complaint_rule_*` 函数里定义一次（版本 / 最小规模 / 率阈值 / 次数阈值 / 等级序列），
+  下游全部由它派生 —— 排序用 `complaint_level_rank`，响应字段用 `complaint_level` /
+  `complaint_basis` / `complaint_rate_percent`，规则接口 `GET /complaint-rules` 原样返回同一批数字。
+  客户端**不再自己维护阈值表**：卡片直接渲染响应里的 `complaintLevel`（及
+  `complaintRatePercent` / `complaintBasis` 用于文案），规则页的区间从接口取。
+- 相关响应字段：职位视图带 `companyStaffSize`（未申报为 `null`）、`complaintLevel`
+  （`excellent/minor/alert/warning/severe`）、`complaintBasis`（`rate`/`count`）、
+  `complaintRatePercent`（率口径下的百分比，次数口径为 `null`）；企业视图带 `staffSize`。
 - 因为排序在服务端完成，**翻页是全局有序的**：第 2 页不会出现比第 1 页等级更优的职位，
   客户端不需要也不能再自行排序（客户端排序只对「页内」有效）。
 - `GET /jobs/my`（本企业职位）企业规模与投诉次数必然相同，实际退化为按发布时间倒序。
@@ -293,7 +298,7 @@ cargo test complaints::       # 只跑举报审核
 cargo test reviewers::        # 只跑审核账号
 cargo test review_locks::     # 只跑并行锁定
 cargo test stats::            # 只跑平台统计
-cargo test complaint_rate::   # 只跑定级 v2（投诉率 × 公司规模）
+cargo test complaint_rate::   # 只跑定级 v2（投诉率 × 公司规模，含单一来源校验）
 cargo test jobs_order::       # 只跑职位列表排序
 ```
 
@@ -304,7 +309,7 @@ cargo test jobs_order::       # 只跑职位列表排序
 | 审核账号 `tests/reviewers.rs` | admin 创建后可用初始密码登录并审核（留痕 `reviewedByName`）、管理接口仅 admin（审核账号自身也 403）、只认 reviewer 角色（对其它角色 404）、禁用即踢下线、改密撤销旧会话、删除清理账号、**多审核账号并行在线各审各的**、同一账号多端登录且登出互不影响、单账号被限流不牵连他人 |
 | 并行锁定 `tests/review_locks.rs` | 认领成功并返回锁状态、他人认领 409（报错含持锁人）、本人重复认领=续约（不改写 lockedAt）、锁过期后可被抢占、释放规则（本人可 / 他人 403 / 非管理员 force 403 / 管理员 force 可 / 过期任何人可清理）、他人持锁时审结 409、无锁直审补记接单时间、并发重复审结第二个 409、业务角色不能认领 |
 | 平台统计 `tests/stats.rs` | 管理员看全部审核账号而审核账号只看自己、业务角色 403、未认证 401、**及时率口径**（2h 及时 + 48h 超时 → 0.5 且无结论类字段）、公司列表最差在前与质量分公式 `100-已核实*10-待审*2`、求职统计聚合（简历/投递/分档/参与度） |
-| 定级 v2 `tests/complaint_rate.rs` | SQL 函数边界与客户端规则逐条对齐（0.5/1.5/3.0% 边界、<50 人退回次数、未申报规模退回次数）、**大公司 20 次投诉排在小公司 3 次之前**、同等级内有规模折算者优先、`companyStaffSize`/`staffSize` 字段透出（未申报为 null）、注册时 `staffSize` 范围校验 |
+| 定级 v2 `tests/complaint_rate.rs` | SQL 函数边界（0.5/1.5/3.0% 边界、<50 人退回次数、未申报规模退回次数）、**大公司 20 次投诉排在小公司 3 次之前**、同等级内有规模折算者优先、`companyStaffSize`/`staffSize` 字段透出（未申报为 null）、注册时 `staffSize` 范围校验；**单一来源**：`GET /complaint-rules` 的数字能复现服务端给出的每个 `complaintLevel`，且返回顺序与等级单调一致 |
 | 列表排序 `tests/jobs_order.rs` | 分页拼接后仍按等级从优到劣（跨页全局有序）、同级按次数与时间、收藏按等级而非收藏时间、本企业职位按发布时间倒序 |
 
 ## 设计要点
@@ -340,6 +345,8 @@ cargo test jobs_order::       # 只跑职位列表排序
 
 ### 一致性约定
 - 会话唯一化 `(user_lo, user_hi)`；投递唯一约束 `(job_id, seeker_id)`；
+- **业务规则单一来源**：投诉定级的阈值只写在 `complaint_rule_*` 函数里（0018），
+  排序、响应字段与 `GET /complaint-rules` 同源；客户端只渲染不计算；
 - 5xx 统一脱敏、原始错误进日志；`RUST_LOG` 控制级别。
 
 ### 数据库注释（COMMENT ON）

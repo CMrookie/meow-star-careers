@@ -7,7 +7,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::error::{ApiResult, AppError};
-use crate::models::complaint::ComplaintView;
+use crate::models::complaint::{ComplaintRules, ComplaintView};
 
 /// 认领锁的租约（秒）：审核端在弹窗打开期间按此周期续约
 pub const LOCK_TTL_SECONDS: i64 = 10 * 60;
@@ -246,4 +246,18 @@ pub async fn review(
     }
     tx.commit().await?;
     get_view(pool, id).await
+}
+
+/// 读取定级规则（数字来自 complaint_rule_* 函数，保证与排序/字段同源）
+pub async fn rules(pool: &PgPool) -> ApiResult<ComplaintRules> {
+    let rules = sqlx::query_as::<_, ComplaintRules>(
+        "SELECT complaint_rule_version() AS version,
+                complaint_rule_levels() AS levels,
+                complaint_rule_min_staff_size() AS min_staff_size_for_rate,
+                complaint_rule_rate_thresholds()::float8[] AS rate_thresholds,
+                complaint_rule_count_thresholds() AS count_thresholds",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(rules)
 }

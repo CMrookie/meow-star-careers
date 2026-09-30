@@ -64,3 +64,23 @@ pub struct ReleaseLockQuery {
     #[serde(default)]
     pub force: bool,
 }
+
+/// 投诉定级规则（**服务端单一来源**）
+///
+/// 数字全部来自数据库里的 `complaint_rule_*` 函数 —— 排序、`JobView` 的
+/// `complaintLevel/complaintBasis/complaintRatePercent` 与本接口三者同源，
+/// 客户端只需渲染，不再自己维护阈值表。
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ComplaintRules {
+    /// 规则版本（如 v2）；客户端可据此决定是否重新提示用户
+    pub version: String,
+    /// 等级序列（由优到劣）：excellent / minor / alert / warning / severe
+    pub levels: Vec<String>,
+    /// 按率定级所需的最小企业规模（人），低于它退回次数口径
+    pub min_staff_size_for_rate: i32,
+    /// 每百人投诉率上界（%）：0.5 / 1.5 / 3.0
+    pub rate_thresholds: Vec<f64>,
+    /// 投诉次数下界：[0, 1, 3, 6, 10]（与客户端原 complaintLevelThresholds 同形）
+    pub count_thresholds: Vec<i32>,
+}

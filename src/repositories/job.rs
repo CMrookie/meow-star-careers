@@ -49,7 +49,10 @@ pub async fn search_active(pool: &PgPool, query: &JobQuery) -> ApiResult<(Vec<Jo
         "SELECT j.id, j.company_id, c.name AS company_name, j.title, j.description,
                 j.requirements, j.location, j.salary_min, j.salary_max, j.job_type,
                 j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at,
-                c.complaints_count, c.staff_size AS company_staff_size
+                c.complaints_count, c.staff_size AS company_staff_size,
+                complaint_level(c.complaints_count, c.staff_size) AS complaint_level,
+                complaint_basis(c.complaints_count, c.staff_size) AS complaint_basis,
+                complaint_rate_percent(c.complaints_count, c.staff_size)::float8 AS complaint_rate_percent
            FROM jobs j
            JOIN companies c ON c.id = j.company_id
           WHERE j.is_active = true
@@ -102,7 +105,10 @@ pub async fn list_for_company(
         "SELECT j.id, j.company_id, c.name AS company_name, j.title, j.description,
                 j.requirements, j.location, j.salary_min, j.salary_max, j.job_type,
                 j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at,
-                c.complaints_count, c.staff_size AS company_staff_size
+                c.complaints_count, c.staff_size AS company_staff_size,
+                complaint_level(c.complaints_count, c.staff_size) AS complaint_level,
+                complaint_basis(c.complaints_count, c.staff_size) AS complaint_basis,
+                complaint_rate_percent(c.complaints_count, c.staff_size)::float8 AS complaint_rate_percent
            FROM jobs j
            JOIN companies c ON c.id = j.company_id
           WHERE j.company_id = $1
@@ -129,7 +135,10 @@ pub async fn get_by_id(pool: &PgPool, id: &Uuid) -> ApiResult<Option<JobView>> {
         "SELECT j.id, j.company_id, c.name AS company_name, j.title, j.description,
                 j.requirements, j.location, j.salary_min, j.salary_max, j.job_type,
                 j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at,
-                c.complaints_count, c.staff_size AS company_staff_size
+                c.complaints_count, c.staff_size AS company_staff_size,
+                complaint_level(c.complaints_count, c.staff_size) AS complaint_level,
+                complaint_basis(c.complaints_count, c.staff_size) AS complaint_basis,
+                complaint_rate_percent(c.complaints_count, c.staff_size)::float8 AS complaint_rate_percent
            FROM jobs j
            JOIN companies c ON c.id = j.company_id
           WHERE j.id = $1",
@@ -146,7 +155,10 @@ pub async fn get_active(pool: &PgPool, id: &Uuid) -> ApiResult<Option<JobView>> 
         "SELECT j.id, j.company_id, c.name AS company_name, j.title, j.description,
                 j.requirements, j.location, j.salary_min, j.salary_max, j.job_type,
                 j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at,
-                c.complaints_count, c.staff_size AS company_staff_size
+                c.complaints_count, c.staff_size AS company_staff_size,
+                complaint_level(c.complaints_count, c.staff_size) AS complaint_level,
+                complaint_basis(c.complaints_count, c.staff_size) AS complaint_basis,
+                complaint_rate_percent(c.complaints_count, c.staff_size)::float8 AS complaint_rate_percent
            FROM jobs j
            JOIN companies c ON c.id = j.company_id
           WHERE j.id = $1 AND j.is_active = true",
@@ -289,7 +301,10 @@ pub async fn list_saved(
         "SELECT j.id, j.company_id, c.name AS company_name, j.title, j.description,
                 j.requirements, j.location, j.salary_min, j.salary_max, j.job_type,
                 j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at,
-                c.complaints_count, c.staff_size AS company_staff_size
+                c.complaints_count, c.staff_size AS company_staff_size,
+                complaint_level(c.complaints_count, c.staff_size) AS complaint_level,
+                complaint_basis(c.complaints_count, c.staff_size) AS complaint_basis,
+                complaint_rate_percent(c.complaints_count, c.staff_size)::float8 AS complaint_rate_percent
            FROM saved_jobs s
            JOIN jobs j ON j.id = s.job_id
            JOIN companies c ON c.id = j.company_id
