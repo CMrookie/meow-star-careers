@@ -2,6 +2,7 @@
 //!
 //! - 鉴权：注册/登录/登出、令牌校验、角色与越权防护（auth.rs）
 //! - 举报审核：发起投诉的前置条件、审核账号/管理员审核及其对排名的影响（complaints.rs）
+//! - 定级 v2（投诉率 × 公司规模）：与服务端同一口径，含规模缺失/过小的次数兜底（complaint_rate.rs）
 //! - 审核专用账号：admin 创建管理、多账号同时在线并行审核（reviewers.rs）
 //! - 并行锁定：认领/续约/过期/释放/持锁审结的并发保护（review_locks.rs）
 //! - 平台统计：审核及时性口径与可见范围、用人单位优劣、求职用户分析（stats.rs）
@@ -9,6 +10,7 @@
 
 mod auth;
 mod common;
+mod complaint_rate;
 mod complaints;
 mod jobs_order;
 mod review_locks;

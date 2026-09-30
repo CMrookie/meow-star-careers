@@ -66,6 +66,10 @@ fn validate_register(payload: &RegisterRequest) -> Result<(), AppError> {
         {
             return Err(AppError::bad_request("企业字段超长（industry≤64 / location≤128 / description≤2000 / website≤200 / logoUrl≤500）"));
         }
+        // 规模是投诉定级 v2 的分母（>=50 人按每百人投诉率），必须是非负数
+        if company.staff_size.is_some_and(|size| !(0..=10_000_000).contains(&size)) {
+            return Err(AppError::bad_request("company.staffSize 须在 0~10,000,000 之间（员工人数）"));
+        }
     }
     Ok(())
 }

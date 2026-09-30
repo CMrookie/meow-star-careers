@@ -153,14 +153,17 @@ fn validate_search_query(query: &JobQuery) -> Result<(), AppError> {
 
 /// 公开搜索在招职位
 ///
-/// 排序契约：结果按用人单位投诉等级**从优到劣**返回（优秀 → 轻微 → 预警 → 警告 → 严重），
-/// 同级内投诉次数少者优先，再按发布时间倒序，末位以 id 兜底；排序在服务端完成，
-/// 因此翻页时全局有序（等级函数与阈值见 `migrations/0013_complaint_level_order.sql`）。
+/// 排序契约（定级 v2）：结果按用人单位投诉等级**从优到劣**返回（优秀 → 轻微 → 预警 → 警告 → 严重）。
+/// 等级按**公司规模折算**：企业申报了员工数且 ≥50 人时用每百人投诉率（≤0.5% 轻微 / ≤1.5% 预警 /
+/// ≤3.0% 警告 / >3.0% 严重），未申报或 <50 人（小样本波动大）退回投诉次数口径；
+/// 同等级内「有规模折算的」优先，再按率（或次数）由小到大，然后发布时间倒序、id 兜底。
+/// 排序在服务端完成，因此翻页时全局有序（函数与阈值见 `migrations/0017_company_staff_size.sql`，
+/// 与求职 App 的 `assessComplaints` / `jobSortKey` 同一口径）。
 #[utoipa::path(
     get,
     path = "/jobs",
     tag = "job",
-    description = "搜索在招职位；结果按用人单位投诉等级从优到劣排序（优秀→轻微→预警→警告→严重），同级内投诉次数少者优先，再按发布时间倒序，翻页全局有序",
+    description = "搜索在招职位；按投诉等级从优到劣排序（优秀→轻微→预警→警告→严重）。等级按公司规模折算：申报规模且 ≥50 人时用每百人投诉率（0.5/1.5/3.0%），否则退回投诉次数；同级内有规模折算者优先，再按率/次数小者优先，翻页全局有序。响应含 companyStaffSize（企业规模，未申报为 null）",
     security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "职位列表", body = JobPage),
@@ -217,7 +220,7 @@ pub async fn create_job(
     get,
     path = "/jobs/my",
     tag = "job",
-    description = "本企业职位；排序与公开列表一致（投诉等级从优到劣），本企业内等级相同，故实际按发布时间倒序",
+    description = "本企业职位；排序与公开列表一致（投诉等级从优到劣、按公司规模折算），本企业内等级相同，故实际按发布时间倒序",
     security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "本企业职位", body = JobPage),
@@ -495,7 +498,7 @@ pub async fn unsave_job(
     get,
     path = "/saved-jobs",
     tag = "job",
-    description = "收藏的职位；排序与公开列表一致（投诉等级从优到劣），同级内按最近收藏时间倒序",
+    description = "收藏的职位；排序与公开列表一致（投诉等级从优到劣、按公司规模折算），同级内按最近收藏时间倒序",
     security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "收藏的职位", body = JobPage),

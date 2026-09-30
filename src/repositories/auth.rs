@@ -133,10 +133,11 @@ async fn insert_company(
     input: &NewCompany,
 ) -> ApiResult<Company> {
     let company = sqlx::query_as::<_, Company>(
-        "INSERT INTO companies (name, industry, description, location, address, website, logo_url, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "INSERT INTO companies (name, industry, description, location, address, website, logo_url,
+                                created_by, staff_size)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id, name, industry, description, location, address, website, logo_url,
-                   is_active, created_by, created_at, updated_at, complaints_count",
+                   is_active, created_by, created_at, updated_at, complaints_count, staff_size",
     )
     .bind(input.name.trim())
     .bind(input.industry.as_deref())
@@ -146,6 +147,7 @@ async fn insert_company(
     .bind(input.website.as_deref())
     .bind(input.logo_url.as_deref())
     .bind(created_by)
+    .bind(input.staff_size)
     .fetch_one(&mut **tx)
     .await?;
     Ok(company)

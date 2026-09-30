@@ -78,6 +78,7 @@ pub async fn recruiter(pool: &PgPool, phone: &str, company_name: &str) -> (Uuid,
         address: None,
         website: None,
         logo_url: None,
+        staff_size: None,
     };
     let (user, company) =
         auth_repo::register_recruiter(pool, phone, "测试招聘者", &hash, &new_company)
@@ -133,15 +134,26 @@ pub async fn make_exchange(pool: &PgPool, seeker_id: &Uuid, recruiter_id: &Uuid)
     conversation.id
 }
 
-/// 直接插企业（指定投诉次数），用于排序 / 审核用例
+/// 直接插企业（指定投诉次数），用于排序 / 审核用例（未申报规模）
 pub async fn seed_company(pool: &PgPool, name: &str, complaints_count: i32) -> Uuid {
+    seed_company_sized(pool, name, complaints_count, None).await
+}
+
+/// 同上，可指定企业规模（员工人数）—— 投诉定级 v2 的分母
+pub async fn seed_company_sized(
+    pool: &PgPool,
+    name: &str,
+    complaints_count: i32,
+    staff_size: Option<i32>,
+) -> Uuid {
     sqlx::query_scalar::<_, Uuid>(
-        "INSERT INTO companies (name, industry, location, complaints_count)
-         VALUES ($1, '互联网', '北京', $2)
+        "INSERT INTO companies (name, industry, location, complaints_count, staff_size)
+         VALUES ($1, '互联网', '北京', $2, $3)
          RETURNING id",
     )
     .bind(name)
     .bind(complaints_count)
+    .bind(staff_size)
     .fetch_one(pool)
     .await
     .unwrap()

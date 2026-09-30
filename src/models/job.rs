@@ -32,6 +32,10 @@ pub struct JobView {
     pub updated_at: DateTime<Utc>,
     /// 企业被投诉次数（决定职位展示颜色）
     pub complaints_count: i32,
+    /// 用人单位规模（员工人数，企业申报；NULL = 未申报）。
+    /// 投诉定级 v2 的分母：>=50 人时按每百人投诉率定级，否则退回次数口径
+    /// （与求职 App 的 `companyStaffSize` 字段一一对应）。
+    pub company_staff_size: Option<i32>,
 }
 
 /// 创建职位

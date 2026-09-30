@@ -25,6 +25,10 @@ pub struct Company {
     pub updated_at: DateTime<Utc>,
     /// 被投诉次数：只统计**管理员审核通过**的投诉（0 = 优秀档，见 complaint_level_rank）
     pub complaints_count: i32,
+    /// 企业规模（员工人数，企业申报；null = 未申报）。
+    /// 投诉定级 v2 的分母：>=50 人按每百人投诉率定级，否则退回次数口径
+    /// （与求职 App 的 `staffSize` 字段一一对应）
+    pub staff_size: Option<i32>,
 }
 
 /// 新建企业（招聘者注册时必填）
@@ -41,4 +45,7 @@ pub struct NewCompany {
     pub address: Option<String>,
     pub website: Option<String>,
     pub logo_url: Option<String>,
+    /// 员工人数（企业申报，可选）。填了才能按每百人投诉率定级（>=50 人时生效）
+    #[schema(example = 2000)]
+    pub staff_size: Option<i32>,
 }

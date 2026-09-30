@@ -10,7 +10,7 @@ use crate::models::company::Company;
 pub async fn get(pool: &PgPool, id: &Uuid) -> ApiResult<Option<Company>> {
     let company = sqlx::query_as::<_, Company>(
         "SELECT id, name, industry, description, location, address, website, logo_url,
-                is_active, created_by, created_at, updated_at, complaints_count
+                is_active, created_by, created_at, updated_at, complaints_count, staff_size
            FROM companies
           WHERE id = $1",
     )

@@ -2,10 +2,16 @@
 //! 所有 SQL 为编译期字面量（sqlx 0.9 要求）。
 //!
 //! 列表排序契约：三个职位列表（公开搜索 / 本企业 / 我的收藏）**一律按用人单位投诉等级
-//! 从优到劣**返回 —— `complaint_level_rank(c.complaints_count) ASC`，同级内按投诉次数由少到多，
-//! 再按时间倒序，末位用 `id` 兜底以保证分页稳定（等级函数定义见
-//! `migrations/0013_complaint_level_order.sql`）。等级排序在**服务端**完成，
-//! 因此翻页时全局有序，客户端无需再排序。
+//! 从优到劣**返回。排序键与求职 App 的 `jobSortKey` 逐项对齐（定级 v2，见
+//! `migrations/0017_company_staff_size.sql`）：
+//!
+//! 1. `complaint_level_rank(complaints_count, staff_size)` —— 有申报规模且 >=50 人时按
+//!    **每百人投诉率**（0.5/1.5/3.0%），否则退回投诉次数口径；
+//! 2. 同等级内有规模折算的排前面（数据更可信）；
+//! 3. 再按率（无规模时按次数）由小到大；
+//! 4. 最后按时间倒序、`id` 兜底，保证分页稳定、跨页全局有序。
+//!
+//! 排序在**服务端**完成，客户端无需再排序。
 
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -42,7 +48,8 @@ pub async fn search_active(pool: &PgPool, query: &JobQuery) -> ApiResult<(Vec<Jo
     let items = sqlx::query_as::<_, JobView>(
         "SELECT j.id, j.company_id, c.name AS company_name, j.title, j.description,
                 j.requirements, j.location, j.salary_min, j.salary_max, j.job_type,
-                j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at, c.complaints_count
+                j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at,
+                c.complaints_count, c.staff_size AS company_staff_size
            FROM jobs j
            JOIN companies c ON c.id = j.company_id
           WHERE j.is_active = true
@@ -54,10 +61,12 @@ pub async fn search_active(pool: &PgPool, query: &JobQuery) -> ApiResult<(Vec<Jo
             AND ($3::text IS NULL OR j.job_type = $3)
             AND ($4::int IS NULL OR COALESCE(j.salary_max, 2147483647) >= $4)
             AND ($5::int IS NULL OR COALESCE(j.salary_min, 0) <= $5)
-          ORDER BY complaint_level_rank(c.complaints_count) ASC,  -- 投诉等级：优秀 -> 严重
-                   c.complaints_count ASC,                        -- 同级内次数更少者优先
-                   j.created_at DESC,                             -- 再按发布时间倒序
-                   j.id DESC                                      -- 末位兜底，保证分页稳定
+          ORDER BY complaint_level_rank(c.complaints_count, c.staff_size) ASC,  -- 定级 v2：有规模按每百人投诉率
+                   (complaint_rate_percent(c.complaints_count, c.staff_size) IS NULL) ASC,  -- 有规模折算的排前面
+                   COALESCE(complaint_rate_percent(c.complaints_count, c.staff_size),
+                            c.complaints_count::numeric) ASC,           -- 同级内率（或次数）小者优先
+                   j.created_at DESC,                                   -- 再按发布时间倒序
+                   j.id DESC                                            -- 末位兜底，保证分页稳定
           LIMIT $6 OFFSET $7",
     )
     .bind(query.keyword.as_deref())
@@ -92,12 +101,15 @@ pub async fn list_for_company(
     let items = sqlx::query_as::<_, JobView>(
         "SELECT j.id, j.company_id, c.name AS company_name, j.title, j.description,
                 j.requirements, j.location, j.salary_min, j.salary_max, j.job_type,
-                j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at, c.complaints_count
+                j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at,
+                c.complaints_count, c.staff_size AS company_staff_size
            FROM jobs j
            JOIN companies c ON c.id = j.company_id
           WHERE j.company_id = $1
-          ORDER BY complaint_level_rank(c.complaints_count) ASC,  -- 同一企业等级相同，实际退化为按发布时间倒序
-                   c.complaints_count ASC,
+          ORDER BY complaint_level_rank(c.complaints_count, c.staff_size) ASC,  -- 同一企业等级相同，实际退化为按发布时间倒序
+                   (complaint_rate_percent(c.complaints_count, c.staff_size) IS NULL) ASC,
+                   COALESCE(complaint_rate_percent(c.complaints_count, c.staff_size),
+                            c.complaints_count::numeric) ASC,
                    j.created_at DESC,
                    j.id DESC
           LIMIT $2 OFFSET $3",
@@ -116,7 +128,8 @@ pub async fn get_by_id(pool: &PgPool, id: &Uuid) -> ApiResult<Option<JobView>> {
     let job = sqlx::query_as::<_, JobView>(
         "SELECT j.id, j.company_id, c.name AS company_name, j.title, j.description,
                 j.requirements, j.location, j.salary_min, j.salary_max, j.job_type,
-                j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at, c.complaints_count
+                j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at,
+                c.complaints_count, c.staff_size AS company_staff_size
            FROM jobs j
            JOIN companies c ON c.id = j.company_id
           WHERE j.id = $1",
@@ -132,7 +145,8 @@ pub async fn get_active(pool: &PgPool, id: &Uuid) -> ApiResult<Option<JobView>> 
     let job = sqlx::query_as::<_, JobView>(
         "SELECT j.id, j.company_id, c.name AS company_name, j.title, j.description,
                 j.requirements, j.location, j.salary_min, j.salary_max, j.job_type,
-                j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at, c.complaints_count
+                j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at,
+                c.complaints_count, c.staff_size AS company_staff_size
            FROM jobs j
            JOIN companies c ON c.id = j.company_id
           WHERE j.id = $1 AND j.is_active = true",
@@ -274,13 +288,16 @@ pub async fn list_saved(
     let items = sqlx::query_as::<_, JobView>(
         "SELECT j.id, j.company_id, c.name AS company_name, j.title, j.description,
                 j.requirements, j.location, j.salary_min, j.salary_max, j.job_type,
-                j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at, c.complaints_count
+                j.experience, j.education, j.is_active, j.created_by, j.created_at, j.updated_at,
+                c.complaints_count, c.staff_size AS company_staff_size
            FROM saved_jobs s
            JOIN jobs j ON j.id = s.job_id
            JOIN companies c ON c.id = j.company_id
           WHERE s.user_id = $1
-          ORDER BY complaint_level_rank(c.complaints_count) ASC,  -- 投诉等级：优秀 -> 严重
-                   c.complaints_count ASC,
+          ORDER BY complaint_level_rank(c.complaints_count, c.staff_size) ASC,  -- 定级 v2：有规模按每百人投诉率
+                   (complaint_rate_percent(c.complaints_count, c.staff_size) IS NULL) ASC,
+                   COALESCE(complaint_rate_percent(c.complaints_count, c.staff_size),
+                            c.complaints_count::numeric) ASC,
                    s.created_at DESC,                             -- 同级内最近收藏的在前
                    j.id DESC
           LIMIT $2 OFFSET $3",
